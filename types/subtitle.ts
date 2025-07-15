@@ -6,4 +6,6 @@ export interface Subtitle {
   startTime: string;
   endTime: string;
   text: string;
+  oringinalText: string;
+  translatedText: string;
 }

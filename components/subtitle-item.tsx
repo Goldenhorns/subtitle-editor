@@ -1,37 +1,42 @@
-import { Input } from "@/components/ui/input";
+// SubtitleItem.tsx
+import { useState, useEffect, useRef } from "react";
+import { motion } from "motion/react";
+import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { useSubtitleContext } from "@/context/subtitle-context"; // Import context
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { isValidTime, timeToSeconds } from "@/lib/utils";
+import { useSubtitleContext } from "@/context/subtitle-context";
 import type { Subtitle } from "@/types/subtitle";
-import { IconFold, IconPlus, IconTrash } from "@tabler/icons-react";
-import { motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
-import { Button } from "./ui/button";
+import {
+  IconTrash,
+  IconWand,
+  IconLanguage,
+  IconFold,
+  IconPlus,
+} from "@tabler/icons-react";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "./ui/tooltip";
+} from "@/components/ui/tooltip";
 
-interface SubtitleItemProps {
+interface Props {
   subtitle: Subtitle;
   nextSubtitle: Subtitle | null;
-  index: number;
   isLastItem: boolean;
   currentTime: number;
   editingSubtitleUuid: string | null;
   onScrollToRegion: (uuid: string) => void;
-  setIsPlaying: (isPlaying: boolean) => void;
-  setPlaybackTime: (time: number) => void;
-  setEditingSubtitleUuid: React.Dispatch<React.SetStateAction<string | null>>;
+  setIsPlaying: (p: boolean) => void;
+  setPlaybackTime: (t: number) => void;
+  setEditingSubtitleUuid: (id: string | null) => void;
 }
 
 export default function SubtitleItem({
   subtitle,
   nextSubtitle,
-  index,
   isLastItem,
   currentTime,
   editingSubtitleUuid,
@@ -39,7 +44,7 @@ export default function SubtitleItem({
   setIsPlaying,
   setPlaybackTime,
   setEditingSubtitleUuid,
-}: SubtitleItemProps) {
+}: Props) {
   const {
     updateSubtitleStartTimeAction,
     updateSubtitleEndTimeAction,
@@ -50,364 +55,307 @@ export default function SubtitleItem({
     splitSubtitleAction,
   } = useSubtitleContext();
 
-  const [editingStartTimeId, setEditingStartTimeId] = useState<number | null>(
-    null
-  );
-  const [editStartTime, setEditStartTime] = useState("");
-  const [editingEndTimeId, setEditingEndTimeId] = useState<number | null>(null);
-  const [editEndTime, setEditEndTime] = useState("");
-  const [editText, setEditText] = useState("");
-  const textAreaRef = useRef<HTMLTextAreaElement | null>(null); // Ref for this item's textarea
-
   const { toast } = useToast();
+  const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Effect to handle focusing the text area when this item is being edited
+  /* ---------- 时间编辑 ---------- */
+  const [editingStart, setEditingStart] = useState(false);
+  const [editingEnd, setEditingEnd] = useState(false);
+  const [draftStart, setDraftStart] = useState(subtitle.startTime);
+  const [draftEnd, setDraftEnd] = useState(subtitle.endTime);
+
+  /* ---------- 文本编辑 ---------- */
+  const [originalText, setOriginalText] = useState("");
+  const [translatedText, setTranslatedText] = useState("");
+
   useEffect(() => {
-    if (editingSubtitleUuid === subtitle.uuid) {
-      setEditText(subtitle.text); // Set text when editing starts
-      // Focus the textarea
-      setTimeout(() => {
-        textAreaRef.current?.focus();
-        textAreaRef.current?.select(); // Select all text
-      }, 0); // Timeout ensures the element is rendered
-    } else {
-      // Reset local editing states if this item is no longer being edited
-      setEditingStartTimeId(null);
-      setEditingEndTimeId(null);
-      // Don't reset editText here, it's handled onBlur/Enter/Escape
-    }
-  }, [editingSubtitleUuid, subtitle.uuid, subtitle.text]);
+    const [o = "", t = ""] = (subtitle.text || "").split("\n");
+    setOriginalText(o);
+    setTranslatedText(t);
+  }, [subtitle.text]);
 
-  const handleTimeUpdate = (
-    id: number,
-    newTime: string,
-    // Replace updateFunction prop with context action
-    updateAction: (id: number, newTime: string) => void,
-    setEditingId: (id: number | null) => void,
-    isStartTime = false
-  ) => {
-    if (!isValidTime(newTime)) {
-      toast({
-        title: "Invalid time format",
-        description: "Please use the format HH:MM:SS,MS (e.g., 00:00:20,450).",
-        className: "border-0 bg-orange-200 text-red-700",
-      });
-      setEditingId(null);
-      return;
-    }
-
-    const newTimeInSeconds = timeToSeconds(newTime);
-
-    if (isStartTime) {
-      if (newTimeInSeconds > timeToSeconds(subtitle.endTime)) {
-        toast({
-          title: "Invalid start time",
-          description:
-            "Start time cannot be later than the end time of the subtitle.",
-          className: "border-0 bg-orange-200 text-red-700",
-        });
-        setEditingId(null);
-        return;
-      }
-    } else {
-      if (newTimeInSeconds < timeToSeconds(subtitle.startTime)) {
-        toast({
-          title: "Invalid end time",
-          description:
-            "End time cannot be earlier than the start time of the subtitle.",
-          className: "border-0 bg-orange-200 text-red-700",
-        });
-        setEditingId(null);
-        return;
-      }
-    }
-
-    updateAction(id, newTime); // Call context action
-    setEditingId(null);
+  const commit = () => {
+    const full = `${originalText}\n${translatedText}`.trim();
+    if (full !== subtitle.text)
+      updateSubtitleTextAction(subtitle.id, full);
   };
 
-  // Calculate if the add button should be disabled
-  let isAddDisabled = false;
-  let addTooltipContent = "Add";
+  const handleTime =
+    (isStart: boolean) => (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key !== "Enter" && e.key !== "Escape") return;
+      e.preventDefault();
+      const val = isStart ? draftStart : draftEnd;
+      if (e.key === "Escape") {
+        isStart ? setEditingStart(false) : setEditingEnd(false);
+        return;
+      }
+      if (!isValidTime(val)) {
+        toast({
+          title: "Invalid time",
+          description: "Use HH:MM:SS,MS",
+          className: "bg-orange-100 text-red-600",
+        });
+        isStart ? setEditingStart(false) : setEditingEnd(false);
+        return;
+      }
+      const sec = timeToSeconds(val);
+      if (isStart) {
+        if (sec > timeToSeconds(subtitle.endTime)) {
+          toast({ title: "Start > End", className: "bg-orange-100 text-red-600" });
+          setEditingStart(false);
+          return;
+        }
+        updateSubtitleStartTimeAction(subtitle.id, val);
+        setEditingStart(false);
+      } else {
+        if (sec < timeToSeconds(subtitle.startTime)) {
+          toast({ title: "End < Start", className: "bg-orange-100 text-red-600" });
+          setEditingEnd(false);
+          return;
+        }
+        updateSubtitleEndTimeAction(subtitle.id, val);
+        setEditingEnd(false);
+      }
+    };
+
+  /* ---------- 生成 / 翻译占位 ---------- */
+  const handleGenerate = () => toast({ title: "开始生成字幕…" });
+  const handleTranslate = () => toast({ title: "开始翻译字幕…" });
+
+  /* ---------- 添加按钮禁用判断 ---------- */
+  let addDisabled = false;
+  let addTip = "Add";
   if (!isLastItem && nextSubtitle) {
-    const currentEndTimeSec = timeToSeconds(subtitle.endTime);
-    const nextStartTimeSec = timeToSeconds(nextSubtitle.startTime);
-    const timeDiff = nextStartTimeSec - currentEndTimeSec;
-    isAddDisabled = timeDiff <= 0.001;
-    if (isAddDisabled) {
-      addTooltipContent = "No room to add";
-    }
+    const gap =
+      timeToSeconds(nextSubtitle.startTime) -
+      timeToSeconds(subtitle.endTime);
+    addDisabled = gap <= 0.001;
+    if (addDisabled) addTip = "No room to add";
   }
 
+  /* ---------- UI ---------- */
   return (
     <motion.div
-      key={subtitle.uuid} // Use UUID for stable key
-      initial={{ opacity: 0, height: 0 }} // Keep height animation
-      animate={{ opacity: 1, height: "auto" }}
-      exit={{ opacity: 0, y: 0 }}
-      transition={{ duration: 0.1 }}
+      key={subtitle.uuid}
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      transition={{ duration: 0.15 }}
     >
       <TooltipProvider>
         <div
           id={`subtitle-${subtitle.uuid}`}
-          onClick={() => onScrollToRegion(subtitle.uuid)}
-          onFocus={() => {
-            setPlaybackTime(timeToSeconds(subtitle.startTime));
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Tab") {
-              e.preventDefault();
-              setPlaybackTime(timeToSeconds(subtitle.startTime));
-              setIsPlaying(true);
-            }
-          }}
-          className={`px-4 py-2 border-b border-gray-800 hover:bg-amber-50 cursor-pointer grid grid-cols-[1rem_7rem_1fr] gap-4 items-center ${
-            timeToSeconds(subtitle.startTime) <= currentTime &&
-            timeToSeconds(subtitle.endTime) > currentTime
-              ? "bg-cyan-50"
-              : ""
-          }`}
+          className={`relative rounded-xl border bg-white shadow-sm hover:shadow-md transition-shadow
+            p-3 mb-3
+            ${
+              timeToSeconds(subtitle.startTime) <= currentTime &&
+              timeToSeconds(subtitle.endTime) > currentTime
+                ? "ring-2 ring-cyan-400"
+                : ""
+            }`}
         >
-          {/* Subtitle ID */}
-          <div className="text-sm text-muted-foreground font-mono">
-            {subtitle.id}
-          </div>
+          {/* 删除按钮（右上角） */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="absolute top-2 right-2 h-7 w-7 text-gray-400 hover:text-red-600"
+            onClick={() => deleteSubtitleAction(subtitle.id)}
+          >
+            <IconTrash size={16} />
+          </Button>
 
-          {/* Subtitle start and end time */}
-          <div className="text-sm text-muted-foreground flex flex-col gap-0">
-            {editingStartTimeId === subtitle.id ? (
+          {/* 顶层：ID + 时间码 */}
+          <div className="flex items-center space-x-4 text-xs text-gray-500">
+            <span className="font-mono">#{subtitle.id}</span>
+            {/* 开始时间 */}
+            {editingStart ? (
               <Input
-                ref={(input) => {
-                  if (input) input.focus();
-                }}
-                value={editStartTime}
-                onChange={(e) => setEditStartTime(e.target.value)}
-                onBlur={() =>
-                  handleTimeUpdate(
-                    subtitle.id,
-                    editStartTime,
-                    updateSubtitleStartTimeAction,
-                    setEditingStartTimeId,
-                    true // Indicate it's the start time
-                  )
-                }
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    handleTimeUpdate(
-                      subtitle.id,
-                      editStartTime,
-                      updateSubtitleStartTimeAction,
-                      setEditingStartTimeId,
-                      true // Indicate it's the start time
-                    );
-                  } else if (e.key === "Escape") {
-                    setEditingStartTimeId(null);
-                  }
-                }}
-                className="p-0 w-26 h-8 text-center text-black"
+                autoFocus
+                className="w-24 h-6 text-xs"
+                value={draftStart}
+                onChange={(e) => setDraftStart(e.target.value)}
+                onBlur={() => setEditingStart(false)}
+                onKeyDown={handleTime(true)}
               />
             ) : (
-              <Button
-                tabIndex={0}
+              <button
+                className="hover:bg-gray-100 px-1 rounded"
                 onClick={() => {
-                  setEditingStartTimeId(subtitle.id);
-                  setEditStartTime(subtitle.startTime);
+                  setEditingStart(true);
+                  setDraftStart(subtitle.startTime);
                 }}
-                onKeyUp={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    setEditingStartTimeId(subtitle.id);
-                    setEditStartTime(subtitle.startTime);
-                  }
-                }}
-                variant="ghost"
-                className="hover:bg-transparent h-8 cursor-pointer"
               >
                 {subtitle.startTime}
-              </Button>
+              </button>
             )}
-
-            {editingEndTimeId === subtitle.id ? (
+            <span>→</span>
+            {/* 结束时间 */}
+            {editingEnd ? (
               <Input
-                ref={(input) => {
-                  if (input) input.focus();
-                }}
-                value={editEndTime}
-                onChange={(e) => setEditEndTime(e.target.value)}
-                onBlur={() =>
-                  handleTimeUpdate(
-                    subtitle.id,
-                    editEndTime,
-                    updateSubtitleEndTimeAction,
-                    setEditingEndTimeId,
-                    false // Indicate it's the end time
-                  )
-                }
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    handleTimeUpdate(
-                      subtitle.id,
-                      editEndTime,
-                      updateSubtitleEndTimeAction,
-                      setEditingEndTimeId,
-                      false // Indicate it's the end time
-                    );
-                  } else if (e.key === "Escape") {
-                    setEditingEndTimeId(null);
-                  }
-                }}
-                className="p-0 w-26 h-8 text-center text-black"
+                autoFocus
+                className="w-24 h-6 text-xs"
+                value={draftEnd}
+                onChange={(e) => setDraftEnd(e.target.value)}
+                onBlur={() => setEditingEnd(false)}
+                onKeyDown={handleTime(false)}
               />
             ) : (
-              <Button
-                tabIndex={0}
+              <button
+                className="hover:bg-gray-100 px-1 rounded"
                 onClick={() => {
-                  setEditingEndTimeId(subtitle.id);
-                  setEditEndTime(subtitle.endTime);
+                  setEditingEnd(true);
+                  setDraftEnd(subtitle.endTime);
                 }}
-                onKeyUp={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    setEditingEndTimeId(subtitle.id);
-                    setEditEndTime(subtitle.endTime);
-                  }
-                }}
-                variant="ghost"
-                className="hover:bg-transparent h-8 cursor-pointer"
               >
                 {subtitle.endTime}
-              </Button>
+              </button>
             )}
           </div>
 
-          {/* Subtitle text */}
-          <div className="flex justify-between items-start gap-4">
+          {/* 原文行 */}
+          <div className="flex items-start space-x-2 mt-2">
             <div className="flex-1">
+              <span className="text-xs text-gray-400">原文</span>
               {editingSubtitleUuid === subtitle.uuid ? (
                 <Textarea
-                  className="w-full px-2 h-4" // Adjust height as needed
-                  ref={textAreaRef} // Assign ref
-                  value={editText}
-                  onChange={(e) => setEditText(e.target.value)}
+                  ref={textAreaRef}
+                  className="w-full min-h-8 text-sm resize-none"
+                  value={originalText}
+                  onChange={(e) => setOriginalText(e.target.value)}
                   onBlur={() => {
-                    // Only update if text actually changed to avoid unnecessary history steps
-                    if (editText !== subtitle.text) {
-                      updateSubtitleTextAction(subtitle.id, editText);
-                    }
-                    setEditingSubtitleUuid(null); // Exit edit mode
+                    commit();
+                    setEditingSubtitleUuid(null);
                   }}
                   onKeyDown={(e) => {
-                    // Stop space key propagation when editing
-                    if (e.key === " ") {
-                      e.stopPropagation();
-                    }
-
-                    // Handle normal Enter key to confirm edit
-                    if (e.key === "Enter") {
-                      e.preventDefault(); // Prevent default newline behavior
-                      if (editText !== subtitle.text) {
-                        updateSubtitleTextAction(subtitle.id, editText);
-                      }
-
-                      // Check SHIFT + ENTER for split
-                      if (e.shiftKey) {
-                        const caretPos = e.currentTarget.selectionStart;
-                        const totalLen = e.currentTarget.value.length;
-                        splitSubtitleAction(subtitle.id, caretPos, totalLen);
-                      }
-
-                      setEditingSubtitleUuid(null); // Exit edit mode
-                    } else if (e.key === "Escape") {
+                    if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
-                      // Cancel edit: Reset text and exit edit mode
-                      setEditText(subtitle.text); // Revert to original text
-                      setEditingSubtitleUuid(null); // Exit edit mode
+                      commit();
+                      setEditingSubtitleUuid(null);
+                    } else if (e.key === "Escape") {
+                      setEditingSubtitleUuid(null);
                     }
                   }}
                 />
               ) : (
                 <button
-                  type="button"
-                  className="w-full text-left text-lg cursor-pointer"
-                  tabIndex={0}
-                  onClick={() => {
-                    setEditingSubtitleUuid(subtitle.uuid);
-                  }}
-                  onKeyUp={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      setEditingSubtitleUuid(subtitle.uuid);
-                    }
-                  }}
+                  className="w-full text-left text-sm bg-gray-50 px-2 py-1 rounded"
+                  onClick={() => setEditingSubtitleUuid(subtitle.uuid)}
                 >
-                  {subtitle.text || (
-                    <span className="text-muted-foreground">(Empty)</span>
+                  {originalText || (
+                    <span className="text-gray-400">(空)</span>
                   )}
                 </button>
               )}
             </div>
+            <Button
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={handleGenerate}
+            >
+              <IconWand size={14} className="mr-1" />
+              生成
+            </Button>
+          </div>
 
-            {/* Delete button */}
+          {/* 译文行 */}
+          <div className="flex items-start space-x-2 mt-2">
+            <div className="flex-1">
+              <span className="text-xs text-gray-400">译文</span>
+              {editingSubtitleUuid === subtitle.uuid ? (
+                <Textarea
+                  className="w-full min-h-8 text-sm resize-none"
+                  value={translatedText}
+                  onChange={(e) => setTranslatedText(e.target.value)}
+                  onBlur={() => {
+                    commit();
+                    setEditingSubtitleUuid(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      commit();
+                      setEditingSubtitleUuid(null);
+                    } else if (e.key === "Escape") {
+                      setEditingSubtitleUuid(null);
+                    } else if (e.key === "Enter" && e.shiftKey) {
+                      e.preventDefault();
+                      const pos = e.currentTarget.selectionStart;
+                      const len = e.currentTarget.value.length;
+                      splitSubtitleAction(subtitle.id, pos, len);
+                      setEditingSubtitleUuid(null);
+                    }
+                  }}
+                />
+              ) : (
+                <button
+                  className="w-full text-left text-sm bg-gray-50 px-2 py-1 rounded"
+                  onClick={() => setEditingSubtitleUuid(subtitle.uuid)}
+                >
+                  {translatedText || (
+                    <span className="text-gray-400">(空)</span>
+                  )}
+                </button>
+              )}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              onClick={handleTranslate}
+            >
+              <IconLanguage size={14} className="mr-1" />
+              翻译
+            </Button>
+          </div>
+
+          {/* 底部合并 / 新增 */}
+          <div className="flex justify-center items-center gap-8 mt-3 -mb-1">
+            {!isLastItem && nextSubtitle && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-2 text-xs"
+                    onClick={() =>
+                      mergeSubtitlesAction(subtitle.id, nextSubtitle.id)
+                    }
+                  >
+                    <IconFold size={14} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Merge</TooltipContent>
+              </Tooltip>
+            )}
 
             <Tooltip>
-              <TooltipTrigger
-                type="button"
-                onClick={() => deleteSubtitleAction(subtitle.id)}
-                className="mx-4 my-auto px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded cursor-pointer"
-              >
-                <IconTrash size={16} />
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={`h-6 px-2 text-xs
+                    ${
+                      addDisabled
+                        ? "text-gray-400 cursor-not-allowed"
+                        : "text-green-600"
+                    }`}
+                  onClick={() => {
+                    if (!addDisabled)
+                      addSubtitleAction(
+                        subtitle.id,
+                        !isLastItem && nextSubtitle
+                          ? nextSubtitle.id
+                          : null
+                      );
+                  }}
+                  disabled={addDisabled}
+                >
+                  <IconPlus size={14} />
+                </Button>
               </TooltipTrigger>
-              <TooltipContent className="bg-red-600 px-2 py-1 text-sm">
-                Delete
-              </TooltipContent>
+              <TooltipContent>{addTip}</TooltipContent>
             </Tooltip>
           </div>
-        </div>
-
-        {/* Merge and add button */}
-        <div className="flex justify-center gap-16 -mt-3 -mb-3">
-          {!isLastItem && nextSubtitle && (
-            <Tooltip>
-              <TooltipTrigger
-                type="button"
-                onClick={() =>
-                  mergeSubtitlesAction(subtitle.id, nextSubtitle.id)
-                }
-                className="px-2 py-1 text-xs bg-yellow-100 hover:bg-yellow-200 text-yellow-700 rounded cursor-pointer"
-              >
-                <IconFold size={16} />
-              </TooltipTrigger>
-              <TooltipContent className="bg-amber-500 px-2 py-1 text-sm">
-                Merge
-              </TooltipContent>
-            </Tooltip>
-          )}
-
-          <Tooltip>
-            <TooltipTrigger
-              type="button"
-              disabled={isAddDisabled}
-              onClick={() => {
-                if (!isAddDisabled) {
-                  addSubtitleAction(
-                    subtitle.id,
-                    !isLastItem && nextSubtitle ? nextSubtitle.id : null
-                  );
-                }
-              }}
-              className={`px-2 py-1 text-sm rounded ${
-                isAddDisabled
-                  ? "bg-gray-200 hover:bg-gray-300 text-gray-700 cursor-not-allowed"
-                  : "bg-green-100 hover:bg-green-200 text-green-700 cursor-pointer"
-              }`}
-            >
-              <IconPlus size={16} />
-            </TooltipTrigger>
-            <TooltipContent
-              className={`px-2 py-1 text-sm ${
-                isAddDisabled ? "bg-gray-500" : "bg-green-500"
-              }`}
-            >
-              {addTooltipContent}
-            </TooltipContent>
-          </Tooltip>
         </div>
       </TooltipProvider>
     </motion.div>
