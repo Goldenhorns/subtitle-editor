@@ -52,6 +52,15 @@ export default function SubtitleList({
     }
   }, [currentTime, subtitles]);
 
+    // 抽出来的公共跳转逻辑
+    const jumpToSubtitleIndex = (index: number) => {
+      if (!subtitles[index]) return;
+      const targetTime = timeToSeconds(subtitles[index].startTime);
+      setPlaybackTime(targetTime);
+      // 可选：setIsPlaying(false);  // 点击后暂停
+    };
+
+
   // Keyboard shortcuts effect
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -168,6 +177,7 @@ export default function SubtitleList({
               setEditingSubtitleUuid={setEditingSubtitleUuid}
               setIsPlaying={setIsPlaying}
               setPlaybackTime={setPlaybackTime}
+              onJump={() => jumpToSubtitleIndex(index)}
             />
           );
         })}

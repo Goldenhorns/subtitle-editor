@@ -153,6 +153,7 @@ export default function SubtitleItem({
                 ? "ring-2 ring-cyan-400"
                 : ""
             }`}
+          onClick={() => setPlaybackTime(timeToSeconds(subtitle.startTime))}
         >
           {/* 删除按钮（右上角） */}
           <Button
